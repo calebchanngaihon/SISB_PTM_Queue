@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  
+  <style>
+    :root { --primary: #0d6efd; --success: #198754; --warning: #ffc107; --danger: #dc3545; }
+    body { background: #f0f2f5; padding: 15px; font-family: 'Segoe UI', system-ui, sans-serif; }
+    
+    #loading-overlay {
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(255,255,255,0.7); z-index: 10000; flex-direction: column;
+      align-items: center; justify-content: center; backdrop-filter: blur(2px);
+    }
+    .spinner-box { width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    #sync-status { font-size: 0.85rem; color: #444; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; }
+    .heartbeat-dot { 
+      width: 14px; height: 14px; background: #2ecc71; border-radius: 50%; display: inline-block; 
+      box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.7); animation: pulse-green 1.5s infinite; 
+    }
+    @keyframes pulse-green { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(46, 204, 113, 0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); } }
+
+    .card { border: none; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); margin-bottom: 10px; border-radius: 10px; transition: transform 0.2s; }
+    .card-called { border-left: 6px solid var(--warning); background: #fffdf5; }
+    .card-meeting { border-left: 6px solid var(--success); background: #f6fff9; }
+    .card-waiting { border-left: 6px solid var(--primary); }
+    .card-deferred { border-left: 6px solid var(--danger); background: #fff5f5; }
+
+    .live-timer { font-family: 'Courier New', monospace; font-weight: bold; padding: 4px 8px; border-radius: 6px; }
+    .pulse-badge { animation: pulse-opacity 1.5s infinite; }
+    @keyframes pulse-opacity { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+    .modal-overlay { display: none; position: fixed; z-index: 10001; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); }
+    .modal-content { background: white; margin: 20vh auto; padding: 25px; width: 90%; max-width: 400px; border-radius: 20px; text-align: center; border: none; }
+  </style>
+</head>
+
+<body>
+  <div id="loading-overlay">
+    <div class="spinner-box"></div>
+    <div class="mt-2 fw-bold text-primary">Updating System...</div>
+  </div>
+
+  <div class="container-fluid">
+    <div class="row mb-3">
+      <div class="col-md-8 offset-md-2 text-center">
+        <h5 class="fw-bold mb-3 text-uppercase text-muted" style="letter-spacing: 1px;">Teacher Console</h5>
+        
+        <div class="d-flex gap-2 justify-content-center mb-1">
+          <select id="dSelect" class="form-select shadow-sm fw-bold" style="border-radius: 8px;" onchange="updateTeacherDropdown()">
+            <option value="">-- Loading Depts... --</option>
+          </select>
+          <select id="tSelect" class="form-select shadow-sm fw-bold" style="border-radius: 8px;" onchange="manualRefresh()" disabled>
+            <option value="">-- Teacher --</option>
+          </select>
+        </div>
+        
+        <div id="sync-status">
+          <span class="heartbeat-dot"></span>
+          <span id="sync-text">Connecting to Server...</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-md-7 mb-3">
+        <div class="d-flex align-items-center mb-2 border-bottom pb-1">
+          <h6 class="text-uppercase fw-bold text-muted m-0" style="letter-spacing: 1px;">Active Queue</h6>
+          <span id="waitCount" class="badge bg-primary ms-2">0</span>
+        </div>
+        <div id="waitingList"><div class="text-center p-4 opacity-50 border rounded bg-white">Please select your name above</div></div>
+      </div>
+      <div class="col-md-5">
+        <div class="d-flex align-items-center mb-2 border-bottom pb-1">
+          <h6 class="text-uppercase fw-bold text-muted m-0" style="letter-spacing: 1px;">Waitlist</h6>
+          <span id="deferCount" class="badge bg-danger ms-2">0</span>
+        </div>
+        <div id="deferredList"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="standardModal" class="modal-overlay">
+    <div class="modal-content shadow-lg">
+      <h5 id="modalTitle" class="fw-bold mb-3">Confirm Action</h5>
+      <div class="d-flex gap-2">
+        <button class="btn btn-light flex-grow-1 py-2 fw-bold" onclick="hideModal()">Cancel</button>
+        <button id="modalConfirmBtn" class="btn btn-primary flex-grow-1 py-2 fw-bold">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let allTeachers = [];
+    let isRequesting = false;
+
+    function runWithRetry(funcName, args = [], retries = 3) {
+      return new Promise((resolve, reject) => {
+        function attempt() {
+          google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(err => {
+              if (retries > 0 && (err.message.includes("simultaneous") || err.message.includes("too many"))) {
+                retries--;
+                setTimeout(attempt, 1500 + (Math.random() * 1000));
+              } else { reject(err); }
+            })[funcName](...args);
+        }
+        attempt();
+      });
+    }
+
+    window.onload = function() {
+      // DEBUG CATCHER ADDED HERE
+      runWithRetry('getTeacherList')
+        .then(populateDropdown)
+        .catch(err => {
+          const dSelect = document.getElementById('dSelect');
+          dSelect.innerHTML = `<option value="">❌ System Error: ${err.message}</option>`;
+          dSelect.classList.add('text-danger', 'border-danger');
+          document.getElementById('sync-text').innerText = "Connection Failed";
+        });
+        
+      setInterval(manualRefresh, 8000); 
+    };
+
+    function setLoading(show) {
+      document.getElementById('loading-overlay').style.display = show ? 'flex' : 'none';
+      isRequesting = show;
+    }
+
+    function populateDropdown(teachers) {
+      const dSelect = document.getElementById('dSelect');
+      const tSelect = document.getElementById('tSelect');
+      
+      // Catch backend errors passed as valid objects
+      if (teachers.length > 0 && String(teachers[0].name).startsWith("ERROR")) {
+        dSelect.innerHTML = `<option value="">❌ ${teachers[0].name}</option>`;
+        dSelect.classList.add('text-danger', 'border-danger');
+        return;
+      }
+
+      allTeachers = teachers;
+      
+      // Look at Column D (department), default to "Other" if blank
+      const departments = [...new Set(teachers.map(t => {
+        let d = t.department ? String(t.department).trim() : "";
+        return d !== "" ? d : "Other";
+      }))].sort();
+      
+      dSelect.innerHTML = '<option value="">-- Select Department --</option>';
+      departments.forEach(d => dSelect.add(new Option(d, d)));
+
+      // Auto-unlock if there's only 1 department available
+      if (departments.length === 1) {
+        dSelect.value = departments[0];
+        updateTeacherDropdown();
+      }
+    }
+
+    function updateTeacherDropdown() {
+      const dept = document.getElementById('dSelect').value;
+      const tSelect = document.getElementById('tSelect');
+      
+      tSelect.innerHTML = '<option value="">-- Select Teacher --</option>';
+      
+      if (dept) {
+        tSelect.disabled = false;
+        // Filter teachers who match this department exactly
+        const filtered = allTeachers.filter(t => {
+          let d = t.department ? String(t.department).trim() : "";
+          return (d !== "" ? d : "Other") === dept;
+        });
+        filtered.forEach(t => tSelect.add(new Option(t.name, t.name)));
+      } else {
+        tSelect.disabled = true;
+      }
+      
+      document.getElementById('waitingList').innerHTML = '<div class="text-center p-4 opacity-50 border rounded bg-white">Please select your name above</div>';
+      document.getElementById('deferredList').innerHTML = '';
+      document.getElementById('waitCount').innerText = '0';
+      document.getElementById('deferCount').innerText = '0';
+    }
+
+    function manualRefresh() {
+      const teacherName = document.getElementById('tSelect').value;
+      if (!teacherName || isRequesting) return;
+      
+      runWithRetry('getTeacherView', [teacherName])
+        .then(data => {
+          renderQueue(data);
+          
+          // Generate a timestamp accurate to the second
+          const now = new Date();
+          const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          
+          document.getElementById('sync-text').innerText = `Last Sync: ${timeStr}`;
+        })
+        .catch(err => console.error("Sync error:", err));
+    }
+
+    function renderQueue(data) {
+      const waitingDiv = document.getElementById('waitingList');
+      const deferredDiv = document.getElementById('deferredList');
+      let waitingHtml = "", deferredHtml = "";
+      let wCount = 0, dCount = 0;
+
+      data.queue.forEach(p => {
+        let translationHtml = "";
+        if (p.language) {
+          if (p.translatorName === "CLAIMED") {
+            translationHtml = ` <span class="badge bg-success text-white px-2 py-1" style="font-size:0.7rem;" title="Translator Dispatched">🌐 ${p.language} ✅</span>`;
+          } else {
+            translationHtml = ` <span class="badge bg-danger text-white px-2 py-1 pulse-badge" style="font-size:0.7rem;" title="Waiting for Translator">🌐 ${p.language} (Pending)</span>`;
+          }
+        }
+        
+        if (p.status === 'Deferred') {
+          dCount++;
+          deferredHtml += `
+            <div class="card py-2 px-3 card-deferred">
+              <div class="d-flex justify-content-between align-items-center">
+                <div class="fw-bold">${p.name}${translationHtml}</div>
+                <div class="d-flex gap-1">
+                  <button class="btn btn-sm btn-primary" onclick="act(this, '${p.id}', 'call')">Call</button>
+                  <button class="btn btn-sm btn-outline-secondary" onclick="act(this, '${p.id}', 'dismiss')">×</button>
+                </div>
+              </div>
+            </div>`;
+        } else {
+          wCount++;
+          let style = "card-waiting", btns = "", statusTxt = "Waiting";
+          
+          if (p.status === 'Called') {
+            style = "card-called";
+            statusTxt = `<span class="badge bg-warning text-dark live-timer" data-start="${p.calledStart}" data-limit="300">CALLED</span>`;
+            btns = `<button class="btn btn-success w-100 mb-1 fw-bold" onclick="act(this, '${p.id}', 'start')">START MEETING</button>
+                    <button class="btn btn-outline-danger w-100 btn-sm fw-bold" onclick="act(this, '${p.id}', 'defer')">NO SHOW</button>`;
+                    
+          } else if (p.status === 'In-Meeting') {
+            style = "card-meeting";
+            statusTxt = `<span class="badge bg-success live-timer" data-start="${p.meetingStart}" data-limit="600">IN MEETING</span>`;
+            btns = `<button class="btn btn-danger w-100 fw-bold" onclick="act(this, '${p.id}', 'finish')">END MEETING</button>`;
+            
+            if (!p.language) {
+              btns += `
+                <div class="d-flex mt-1 gap-1">
+                  <button class="btn btn-sm btn-outline-primary w-100 px-1 fw-bold d-flex flex-column align-items-center py-1" onclick="reqLang('${p.id}', 'Thai')" style="font-size: 0.7rem; line-height: 1;">
+                    <span style="font-size: 1.1rem; margin-bottom: 2px;">+</span><span>Thai</span>
+                  </button>
+                  <button class="btn btn-sm btn-outline-primary w-100 px-1 fw-bold d-flex flex-column align-items-center py-1" onclick="reqLang('${p.id}', 'Chinese')" style="font-size: 0.7rem; line-height: 1;">
+                    <span style="font-size: 1.1rem; margin-bottom: 2px;">+</span><span>Chinese</span>
+                  </button>
+                </div>
+              `;
+            }
+            
+          } else {
+            // GRAY-OUT TWEAK: Check if the parent is busy with another teacher
+            if (p.isParentBusy) {
+              style = "card-waiting opacity-50 bg-light";
+              btns = `<button class="btn btn-secondary w-100 fw-bold mb-1" disabled>BUSY</button>
+                      <button class="btn btn-outline-danger btn-sm w-100 fw-bold" onclick="act(this, '${p.id}', 'defer')">Defer</button>`;
+            } else {
+              style = "card-waiting";
+              btns = `<button class="btn btn-primary w-100 fw-bold mb-1" onclick="act(this, '${p.id}', 'call')">CALL PARENT</button>
+                      <button class="btn btn-outline-danger btn-sm w-100 fw-bold" onclick="act(this, '${p.id}', 'defer')">Defer</button>`;
+            }
+          }
+
+          waitingHtml += `
+            <div class="card py-2 px-3 ${style}" style="transition: all 0.3s ease;">
+              <div class="d-flex justify-content-between align-items-center">
+                <div class="flex-grow-1 pe-2">
+                  <div class="h6 mb-1 fw-bold">${p.name}${translationHtml}</div>
+                  <div class="small text-muted" style="line-height: 1.2;">${statusTxt} ${p.isParentBusy ? '<br><span class="text-danger fw-bold" style="font-size: 0.75rem;">● In another meeting</span>' : ''}</div>
+                </div>
+                <div style="width: 160px; flex-shrink: 0;">${btns}</div>
+              </div>
+            </div>`;
+        }
+      });
+
+      document.getElementById('waitCount').innerText = wCount;
+      document.getElementById('deferCount').innerText = dCount;
+      waitingDiv.innerHTML = waitingHtml || '<div class="alert alert-light text-center border">Queue is empty</div>';
+      deferredDiv.innerHTML = deferredHtml || '';
+    }
+
+    function act(btn, id, action) {
+      const tName = document.getElementById('tSelect').value;
+      if (!tName) return;
+      btn.disabled = true;
+      btn.innerText = "...";
+      setLoading(true);
+      runWithRetry('updateStatus', [id, tName, action])
+        .then(manualRefresh)
+        .catch(err => alert("System busy. Please try that action again in a few seconds."))
+        .finally(() => setLoading(false));
+    }
+
+    function reqLang(id, lang) {
+      const tName = document.getElementById('tSelect').value;
+      if (!tName) return;
+      showModal(`Request a ${lang} translator right now?`, () => {
+        setLoading(true);
+        runWithRetry('requestTranslator', [id, tName, lang])
+          .then(manualRefresh)
+          .catch(err => alert("System busy. Please try again in a few seconds."))
+          .finally(() => setLoading(false));
+      });
+    }
+
+    function showModal(title, onConfirm) {
+      document.getElementById('modalTitle').innerText = title;
+      document.getElementById('standardModal').style.display = 'block';
+      document.getElementById('modalConfirmBtn').onclick = () => { hideModal(); onConfirm(); };
+    }
+    function hideModal() { document.getElementById('standardModal').style.display = 'none'; }
+
+    setInterval(() => {
+      document.querySelectorAll('.live-timer').forEach(el => {
+        const start = parseInt(el.getAttribute('data-start'));
+        if (!start) return;
+        const diff = Math.floor((Date.now() - start) / 1000);
+        const mins = Math.floor(diff / 60);
+        const secs = diff % 60;
+        el.innerText = (el.innerText.split(' ')[0]) + " " + mins.toString().padStart(2, '0') + ":" + secs.toString().padStart(2, '0');
+        if (diff > parseInt(el.getAttribute('data-limit'))) el.className = el.className.replace('bg-success', 'bg-danger').replace('bg-warning', 'bg-danger');
+      });
+    }, 1000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 15px;
+      background: #f0f2f5;
+    }
+
+    .card {
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      margin-bottom: 15px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      cursor: pointer;
+      position: relative;
+    }
+
+    /* Clean, non-flashing color coding */
+    .border-called {
+      border-left: 8px solid #0d6efd;
+    }
+
+    /* Blue */
+    .border-meeting {
+      border-left: 8px solid #198754;
+    }
+
+    /* Green */
+
+    .room {
+      font-size: 1.4em;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    .teacher {
+      color: #555;
+    }
+
+    .lang {
+      color: #8e44ad;
+      font-weight: bold;
+      margin-top: 8px;
+      font-size: 1.1em;
+    }
+
+    .hint {
+      text-align: center;
+      color: #777;
+      font-size: 0.9em;
+    }
+
+    /* Simple CSS Badges */
+    .badge {
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.8em;
+      font-weight: bold;
+      color: white;
+      float: right;
+    }
+
+    .badge-called {
+      background-color: #0d6efd;
+    }
+
+    .badge-meeting {
+      background-color: #198754;
+    }
+
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      z-index: 9999;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.6);
+    }
+
+    .modal-content {
+      background: white;
+      margin: 40% auto;
+      padding: 25px;
+      width: 85%;
+      max-width: 400px;
+      border-radius: 15px;
+      text-align: center;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .btn-std {
+      flex: 1;
+      padding: 12px;
+      border-radius: 8px;
+      font-weight: bold;
+      cursor: pointer;
+      border: none;
+    }
+  </style>
+</head>
+
+<body>
+  <h2 style="text-align:center">🌐 Translation Requests</h2>
+  <p class="hint">Tap a card to claim and clear it from the board.</p>
+  <div id="list">Loading...</div>
+
+  <script>
+    function load() { 
+      google.script.run
+        .withSuccessHandler(render)
+        .withFailureHandler(err => {
+          // Log silently or handle softly so it doesn't interrupt the translator's flow too badly on auto-refresh
+          console.warn("Auto-refresh failed, likely bad connection.");
+        })
+        .getTranslatorData(); 
+    }
+    
+    // Custom Error Popup 
+    function showError(message) {
+      document.getElementById('errorMessageText').innerText = message;
+      document.getElementById('errorModal').style.display = 'block';
+    }
+
+    // Intercepts Google errors
+    function handleServerError(err) {
+      let msg = err.message || String(err);
+      if (msg.includes("simultaneous invocations") || msg.includes("too many requests")) {
+        showError("The system is very busy right now. Please wait a few seconds and try clicking again.");
+      } else if (msg.includes("NetworkError") || msg.includes("Failed to fetch")) {
+        showError("We couldn't connect to the server. Please check your internet connection.");
+      } else {
+        showError(msg.replace(/^Error:\s*/i, ''));
+      }
+    }
+
+    function render(jobs) {
+      const div = document.getElementById('list');
+      if (jobs.length === 0) {
+        div.innerHTML = "<p style='text-align:center; margin-top:50px; color:#555;'>No active calls requiring translation.</p>";
+        return;
+      }
+      
+      div.innerHTML = jobs.map(j => {
+        let isMeeting = (j.meetingStatus === "In-Meeting");
+        let borderClass = isMeeting ? "border-meeting" : "border-called";
+        let badgeClass = isMeeting ? "badge-meeting" : "badge-called";
+        
+        return `
+        <div class="card ${borderClass}" onclick="claim('${j.id}', '${j.teacher}')">
+          <div class="room">
+            📍 Room ${j.room}
+            <span class="badge ${badgeClass}">${j.meetingStatus}</span>
+          </div>
+          <div class="teacher">Teacher: ${j.teacher}</div>
+          <div class="lang">🗣️ Need: ${j.language}</div>
+        </div>
+        `;
+      }).join('');
+    }
+
+    function claim(id, teacher) {
+      showModal("Are you heading to this room?", () => {
+        google.script.run
+          .withSuccessHandler(load)
+          .withFailureHandler(err => {
+            handleServerError(err);
+            load();
+          })
+          .claimTranslation(id, teacher);
+      });
+    }
+
+    // MODIFIED: Changed to 8 seconds to prevent server crashing!
+    setInterval(load, 8000); 
+    load();
+
+    // MODIFIED: Added button locking to prevent double-clicks
+    function showModal(title, onConfirm) {
+      document.getElementById('modalTitle').innerText = title;
+      document.getElementById('standardModal').style.display = 'block';
+      
+      let confirmBtn = document.getElementById('modalConfirmBtn');
+      confirmBtn.innerText = "Confirm";
+      confirmBtn.disabled = false;
+      
+      confirmBtn.onclick = () => {
+        confirmBtn.innerText = "Processing...";
+        confirmBtn.disabled = true;
+        onConfirm();
+        hideModal();
+      };
+    }
+
+    function hideModal() {
+      document.getElementById('standardModal').style.display = 'none';
+    }
+  </script>
+
+  <div id="standardModal" class="modal-overlay">
+    <div class="modal-content">
+      <h5 id="modalTitle">Are you sure?</h5>
+      <div class="btn-group">
+        <button class="btn-std" style="background:#e9ecef;" onclick="hideModal()">Cancel</button>
+        <button id="modalConfirmBtn" class="btn-std" style="background:#198754; color:white;">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="errorModal" class="modal-overlay">
+    <div class="modal-content">
+      <h5 style="color: #d93025; margin-top: 0;">Notice</h5>
+      <p id="errorMessageText" style="margin-bottom: 20px;"></p>
+      <button onclick="document.getElementById('errorModal').style.display='none'" class="btn-std" style="background: #5f6368; color: white; width: 100%;">OK</button>
+    </div>
+  </div>
+</body>
+
+</html>

@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+  <style>
+    :root {
+      --primary: #0d6efd;
+      --success: #198754;
+      --warning: #ffc107;
+      --danger: #dc3545;
+      --dark-blue: #1a2a3a;
+    }
+
+    body { background: #f4f7f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding-top: 10px; padding-bottom: 70px; }
+    .container { max-width: 500px; }
+
+    /* Technical Protection: The Loading Overlay */
+    #loading-overlay {
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.7); z-index: 10000; flex-direction: column;
+      align-items: center; justify-content: center; color: white; backdrop-filter: blur(3px);
+    }
+    .spinner-box { width: 50px; height: 50px; border: 5px solid #f3f3f3; border-top: 5px solid var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    /* Teacher Card Styling */
+    .teacher-card {
+      background: white; border-radius: 16px; padding: 18px; margin-bottom: 15px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-left: 6px solid #dee2e6;
+      transition: all 0.3s ease;
+    }
+    .card-called { border-left-color: var(--warning); background: #fffdf5; animation: pulse-border 2s infinite; }
+    .card-meeting { border-left-color: var(--success); background: #f6fff9; }
+    .card-deferred { border-left-color: var(--danger); background: #fff5f5; }
+    
+    @keyframes pulse-border {
+      0% { box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.4); }
+      70% { box-shadow: 0 0 0 10px rgba(255, 193, 7, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(255, 193, 7, 0); }
+    }
+
+    /* Queue Tracker Dots */
+    .queue-steps { display: flex; gap: 4px; margin-top: 8px; }
+    .step-dot { height: 6px; flex-grow: 1; background: #e9ecef; border-radius: 3px; }
+    .step-active { background: var(--primary); }
+
+    .status-badge { font-weight: 800; border-radius: 8px; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.5px; }
+    .accordion-button:not(.collapsed) { background-color: #e7f1ff; color: #0c63e4; }
+
+    /* Parent App Floating Sync Pill */
+    #parent-sync-status {
+      position: fixed;
+      bottom: 25px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(5px);
+      padding: 8px 20px;
+      border-radius: 30px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+      font-size: 0.85rem;
+      color: #333;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      z-index: 1000;
+      border: 1px solid #e0e0e0;
+    }
+    
+    .parent-heartbeat { 
+      width: 14px; 
+      height: 14px; 
+      background: #2ecc71; 
+      border-radius: 50%; 
+      display: inline-block; 
+      animation: pulse-obvious 1.2s infinite; 
+    }
+    
+    @keyframes pulse-obvious { 
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.8); } 
+      70% { transform: scale(1.1); box-shadow: 0 0 0 14px rgba(46, 204, 113, 0); } 
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); } 
+    }
+  </style>
+</head>
+<body>
+
+  <div id="loading-overlay">
+    <div class="spinner-box"></div>
+    <div class="mt-3 fw-bold">Connecting to Server...</div>
+    <div class="small opacity-75">Please don't refresh the page</div>
+  </div>
+
+  <div class="container">
+    <div class="text-center mb-4">
+      <div class="rounded shadow-sm p-3 w-100" style="background-color: var(--dark-blue) !important;">
+        <img src="https://sisb.ac.th/wp-content/uploads/2022/07/main-logo-white.png" alt="School Logo" style="max-height: 45px;">
+      </div>
+    </div>
+
+    <div id="joinSection">
+      <div class="card p-4 border-0 shadow-sm" style="border-radius: 15px;">
+        <h3 class="text-center mb-1" id="formTitle">Loading...</h3>
+        <p class="text-muted text-center small mb-1" id="formSubtitle">Identifying session...</p>
+        <p class="text-primary text-center mb-3" id="formNote" style="font-size: 0.8rem; font-weight: 600;">...</p>
+
+        <div class="row g-2 mb-3">
+          <div class="col-12">
+            <select id="pClass" class="form-select form-select-lg" onchange="updateStudentDropdown()">
+              <option value="">-- Select Class --</option>
+            </select>
+          </div>
+          <div class="col-12">
+            <select id="pStudent" class="form-select form-select-lg" disabled>
+              <option value="">-- Select Student --</option>
+            </select>
+          </div>
+        </div>
+
+        <label class="form-label fw-bold small text-uppercase text-muted">Choose Teachers</label>
+        <div id="checkboxList" class="mb-4">
+            <div class="text-center p-3"><div class="spinner-border text-primary spinner-border-sm"></div></div>
+        </div>
+
+        <button onclick="join()" id="btnJoin" class="btn btn-primary w-100 py-3 fw-bold shadow">JOIN QUEUE</button>
+        <button onclick="showDashboard()" id="btnCancel" class="btn btn-link text-muted w-100 mt-2" style="display:none;">Back to My Status</button>
+      </div>
+    </div>
+
+    <div id="dashboardSection" style="display:none;">
+      <h5 class="mb-3 text-center text-muted text-uppercase fw-bold" style="letter-spacing: 1px;">Your Appointments</h5>
+
+      <div id="statusList">
+        <div class="text-center p-5 text-muted">
+          <div class="spinner-border text-secondary mb-2"></div><br>Updating your position...
+        </div>
+      </div>
+
+      <button onclick="showAddMore()" class="btn btn-outline-primary w-100 mt-3 py-3 fw-bold" style="border-radius: 12px; border-style: dashed;">
+        + ADD SIBLING / TEACHER
+      </button>
+
+      <div class="mt-5 pt-4 border-top">
+        <button onclick="leaveEvent()" class="btn btn-danger w-100 py-2 fw-bold shadow-sm">I'm Leaving the Event</button>
+        <button onclick="logout()" class="btn btn-link w-100 mt-2 text-muted text-decoration-none small">Sign out (Keep queues active)</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="parent-sync-status">
+    <span class="parent-heartbeat"></span>
+    <span id="sync-text">Connecting...</span>
+  </div>
+
+  <div id="standardModal" class="modal-overlay" style="display:none; position:fixed; z-index:10001; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6);">
+    <div style="background:white; margin:20% auto; padding:25px; width:85%; max-width:350px; border-radius:15px; text-align:center;">
+      <h6 id="modalTitle" class="fw-bold">Are you sure?</h6>
+      <div class="d-flex gap-2 mt-4">
+        <button class="btn btn-light flex-grow-1" onclick="hideModal()">Cancel</button>
+        <button id="modalConfirmBtn" class="btn btn-primary flex-grow-1">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let myId = null;
+    let studentDataMap = {};
+    const POLL_RATE = 10000; // 10 seconds
+
+    function runWithRetry(funcName, args = [], retries = 3) {
+      return new Promise((resolve, reject) => {
+        function attempt() {
+          google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(err => {
+              if (retries > 0 && (err.message.includes("simultaneous") || err.message.includes("too many"))) {
+                retries--;
+                setTimeout(attempt, 1500 + (Math.random() * 1000));
+              } else { reject(err); }
+            })[funcName](...args);
+        }
+        attempt();
+      });
+    }
+
+    function setLoading(show) {
+      document.getElementById('loading-overlay').style.display = show ? 'flex' : 'none';
+    }
+
+    window.onload = () => {
+      loadMessages();
+      loadTeachers();
+      loadStudents();
+      
+      const storedId = localStorage.getItem('parent_queue_id');
+      if (storedId) {
+        myId = storedId;
+        showDashboard();
+        startPolling();
+      }
+    };
+
+    function loadMessages() {
+      runWithRetry('getMessages').then(data => {
+        if (data.title) document.getElementById('formTitle').innerText = data.title;
+        if (data.subtitle) document.getElementById('formSubtitle').innerText = data.subtitle;
+        if (data.note) document.getElementById('formNote').innerText = data.note;
+      });
+    }
+
+    function loadStudents() {
+      runWithRetry('getStudentData').then(data => {
+        studentDataMap = data;
+        const sel = document.getElementById('pClass');
+        sel.innerHTML = '<option value="">-- Select Class --</option>';
+        Object.keys(data).sort().forEach(c => sel.innerHTML += `<option value="${c}">${c}</option>`);
+      });
+    }
+
+    function updateStudentDropdown() {
+      const cls = document.getElementById('pClass').value;
+      const stu = document.getElementById('pStudent');
+      stu.innerHTML = '<option value="">-- Select Student --</option>';
+      if (cls && studentDataMap[cls]) {
+        stu.disabled = false;
+        studentDataMap[cls].forEach(s => stu.innerHTML += `<option value="${s}">${s}</option>`);
+      } else { stu.disabled = true; }
+    }
+
+    function loadTeachers() {
+      runWithRetry('getTeacherList').then(teachers => {
+        const div = document.getElementById('checkboxList');
+        const grouped = {};
+        teachers.forEach(t => {
+          const d = t.department || "Other";
+          if (!grouped[d]) grouped[d] = [];
+          grouped[d].push(t);
+        });
+
+        let html = `<div class="accordion border-0 shadow-sm" id="tAcc">`;
+        Object.keys(grouped).sort().forEach((dept, i) => {
+          html += `
+            <div class="accordion-item border-0 mb-1">
+              <h2 class="accordion-header"><button class="accordion-button collapsed py-2 small fw-bold" type="button" data-bs-toggle="collapse" data-bs-target="#c${i}">${dept}</button></h2>
+              <div id="c${i}" class="accordion-collapse collapse" data-bs-parent="#tAcc"><div class="accordion-body p-2">`;
+          
+          grouped[dept].forEach(t => {
+            const isAbsent = (t.room && t.room.toUpperCase() === "NA");
+            html += `
+              <div class="d-flex align-items-center justify-content-between p-2 border-bottom">
+                <div class="form-check">
+                  <input class="form-check-input t-check" type="checkbox" value="${t.name}" id="cb_${i}_${t.name.replace(/\W/g,'')}" ${isAbsent?'disabled':''}>
+                  <label class="form-check-label ms-2 ${isAbsent?'text-muted text-decoration-line-through':''}" for="cb_${i}_${t.name.replace(/\W/g,'')}">
+                    <strong>${t.name}</strong><br><small class="text-muted">${t.subject} ${isAbsent?'':'('+t.room+')'}</small>
+                  </label>
+                </div>
+                ${isAbsent ? '<span class="badge bg-danger">ABSENT</span>' : `<span class="badge bg-light text-dark border">${t.count} in line</span>`}
+              </div>`;
+          });
+          html += `</div></div></div>`;
+        });
+        div.innerHTML = html + `</div>`;
+      });
+    }
+
+    function join() {
+      const cls = document.getElementById('pClass').value;
+      const stu = document.getElementById('pStudent').value;
+      const selected = Array.from(document.querySelectorAll('.t-check:checked')).map(c => c.value);
+
+      if (!cls || !stu || selected.length === 0) {
+        alert("Please select class, student, and at least one teacher.");
+        return;
+      }
+
+      setLoading(true);
+      runWithRetry('joinQueue', [stu, cls, selected, {}, myId])
+        .then(id => {
+          myId = id;
+          localStorage.setItem('parent_queue_id', id);
+          localStorage.setItem('parent_queue_name', stu);
+          localStorage.setItem('parent_queue_class', cls);
+          
+          // FIX: Erase all checked boxes after joining so they don't persist
+          document.querySelectorAll('.t-check').forEach(c => c.checked = false);
+
+          showDashboard();
+          startPolling();
+        })
+        .catch(err => alert(err.message))
+        .finally(() => setLoading(false));
+    }
+
+    function showDashboard() {
+      document.getElementById('joinSection').style.display = 'none';
+      document.getElementById('dashboardSection').style.display = 'block';
+    }
+
+    function showAddMore() {
+      document.getElementById('joinSection').style.display = 'block';
+      document.getElementById('dashboardSection').style.display = 'none';
+      document.getElementById('btnCancel').style.display = 'block';
+      
+      const savedClass = localStorage.getItem('parent_queue_class');
+      const savedName = localStorage.getItem('parent_queue_name');
+      
+      if(savedClass) {
+        document.getElementById('pClass').value = savedClass;
+        updateStudentDropdown();
+        
+        // FIX: Re-select the student's name automatically
+        if (savedName) {
+            setTimeout(() => { document.getElementById('pStudent').value = savedName; }, 10);
+        }
+      }
+    }
+
+    function startPolling() {
+      poll();
+      if (!window.pollInterval) window.pollInterval = setInterval(poll, POLL_RATE);
+    }
+
+    function poll() {
+      if (!myId) return;
+      runWithRetry('getParentDashboard', [myId]).then(data => {
+        document.getElementById('sync-text').innerText = "Last Sync: " + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+        
+        const active = data.filter(d => d.status !== 'Cancelling' && d.status !== 'Cancelled' && d.status !== 'Completed');
+        const div = document.getElementById('statusList');
+
+        if (active.length === 0) {
+          div.innerHTML = `<div class="alert alert-light border text-center p-4">No active queues.<br><small>Add a teacher to get started.</small></div>`;
+          return;
+        }
+
+        div.innerHTML = active.map(item => {
+          let badge = "", cardClass = "", msg = "", dots = "";
+          const room = item.room || "Room";
+
+          if (item.status === 'Called') {
+            cardClass = "card-called";
+            badge = `<span class="status-badge bg-warning p-2">HEAD TO ${room}</span>`;
+            msg = `<div class="text-danger fw-bold mt-1">The teacher is ready for you!</div>`;
+          } else if (item.status === 'In-Meeting') {
+            cardClass = "card-meeting";
+            badge = `<span class="status-badge bg-success text-white p-2">IN MEETING</span>`;
+            msg = `<div class="text-success small mt-1">Meeting in progress at ${room}</div>`;
+          } else if (item.status === 'Deferred') {
+            // FIX: Explicitly handle the "Waitlisted" (Deferred) status
+            cardClass = "card-deferred";
+            badge = `<span class="status-badge bg-danger text-white p-2">WAITLISTED</span>`;
+            msg = `<div class="text-danger fw-bold small mt-1">You were busy. You will be called again.</div>`;
+          } else {
+            badge = `<span class="status-badge bg-light border p-2">POS: ${item.position}</span>`;
+            // Visual Progress Dots (Psychological)
+            const totalSteps = 5; 
+            const activeSteps = Math.max(1, totalSteps - item.position + 1);
+            dots = `<div class="queue-steps">${Array.from({length: totalSteps}).map((_,i) => `<div class="step-dot ${i<activeSteps?'step-active':''}"></div>`).join('')}</div>`;
+            
+            if(item.position === 1) msg = `<div class="text-primary fw-bold mt-1">You are next!</div>`;
+            else msg = `<div class="text-muted small mt-1">Teacher is seeing other parents.</div>`;
+          }
+
+          return `
+            <div class="teacher-card ${cardClass}">
+              <div class="d-flex justify-content-between align-items-start">
+                <div>
+                  <div class="fw-bold h6 mb-0">${item.teacher}</div>
+                  <div class="small text-muted mb-2">${item.subject}</div>
+                  ${badge}
+                </div>
+                <div class="text-end">
+                   ${item.status === 'In-Meeting' ? 
+                     `<button class="btn btn-sm btn-success" onclick="confirmFinish('${item.teacher}')">Done</button>` : 
+                     `<button class="btn btn-sm btn-outline-secondary" onclick="confirmLeave('${item.teacher}')">Leave</button>`}
+                </div>
+              </div>
+              ${dots}
+              ${msg}
+            </div>`;
+        }).join('');
+      });
+    }
+
+    function confirmLeave(t) {
+      showModal(`Leave queue for ${t}?`, () => {
+        setLoading(true);
+        runWithRetry('parentCancel', [myId, t]).then(poll).finally(() => setLoading(false));
+      });
+    }
+
+    function confirmFinish(t) {
+      showModal(`Meeting with ${t} finished?`, () => {
+        setLoading(true);
+        runWithRetry('parentComplete', [myId, t]).then(poll).finally(() => setLoading(false));
+      });
+    }
+
+    function leaveEvent() {
+      showModal("Cancel ALL queues and leave?", () => {
+        setLoading(true);
+        runWithRetry('cancelAllQueues', [myId]).then(() => {
+          localStorage.clear();
+          location.reload();
+        });
+      });
+    }
+
+    function logout() {
+      showModal("Sign out? (Your queues will stay active)", () => {
+        localStorage.clear();
+        location.reload();
+      });
+    }
+
+    function showModal(t, cb) {
+      document.getElementById('modalTitle').innerText = t;
+      document.getElementById('standardModal').style.display = 'block';
+      document.getElementById('modalConfirmBtn').onclick = () => { hideModal(); cb(); };
+    }
+    function hideModal() { document.getElementById('standardModal').style.display = 'none'; }
+  </script>
+  
+</body>
+</html>

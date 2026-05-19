@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <base target="_top">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Roboto:wght@400;500&display=swap"
+    rel="stylesheet">
+  <style>
+    body {
+      background: #0f0f0f;
+      color: white;
+      height: 100vh;
+      margin: 0;
+      overflow: hidden;
+      font-family: 'Roboto', sans-serif;
+      border: 20px solid #222;
+      box-sizing: border-box;
+    }
+
+    .top-bar {
+      background: #1a1a1a;
+      padding: 10px 30px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid #333;
+    }
+
+    /* NEW: Matches the parent app's logo styling */
+    .logo-container {
+      background-color: #1a2a3a;
+      padding: 5px 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .clock {
+      font-family: 'Oswald', sans-serif;
+      font-size: 2rem;
+      color: #aaa;
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+
+    /* Subtle warning for the AV team if connection drops */
+    .offline-warning {
+      color: #e74c3c;
+      font-size: 1rem;
+      font-weight: bold;
+      font-family: 'Roboto', sans-serif;
+      display: none;
+      animation: blink 2s infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      height: calc(100vh - 140px);
+      padding: 25px;
+      overflow: hidden;
+    }
+
+    .main-grid > div:first-child {
+      border-right: 2px solid #333;
+      padding-right: 25px;
+    }
+
+    .main-grid > div:last-child {
+      padding-left: 25px;
+    }
+
+    #calledList {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+      align-content: start;
+    }
+
+    #deferredList {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      align-content: start;
+    }
+
+    .card-call {
+      background: #1e1e1e;
+      border: 1px solid #2ecc71;
+      padding: 15px;
+      border-radius: 10px;
+    }
+
+    .child-name {
+      font-size: 1.5rem;
+      font-weight: 700;
+      font-family: 'Oswald', sans-serif;
+      color: #2ecc71;
+    }
+
+    .wait-item {
+      background: #252525;
+      padding: 12px;
+      border-left: 5px solid #e74c3c;
+      border-radius: 6px;
+    }
+
+    .wait-student {
+      font-size: 1rem;
+      font-weight: bold;
+      color: #fff;
+    }
+
+    .wait-teacher {
+      font-size: 0.85rem;
+      color: #aaa;
+      margin-top: 2px;
+    }
+
+    .grade-tag {
+      font-size: 0.7rem;
+      padding: 3px 8px;
+      border-radius: 4px;
+      margin-left: 8px;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+
+    .grade-7 { background: #00bcd4; color: #000; }
+    .grade-8 { background: #4caf50; color: #fff; }
+    .grade-9 { background: #cddc39; color: #000; }
+    .grade-10 { background: #2196f3; color: #fff; }
+    .grade-11 { background: #9c27b0; color: #fff; }
+    .grade-12 { background: #ff9800; color: #000; }
+    .grade-default { background: #555; color: #fff; }
+
+    .stats-bar {
+      position: fixed;
+      bottom: 0;
+      width: 100%;
+      background: #1a1a1a;
+      padding: 8px 30px;
+      border-top: 2px solid #333;
+      display: flex;
+      justify-content: center;
+      gap: 50px;
+      color: #888;
+      font-size: 1.1rem;
+    }
+
+    #timerBar {
+      height: 6px;
+      background: #2ecc71;
+      width: 100%;
+      transition: width 0.1s linear;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="timerBar"></div>
+  <div id="clickOverlay" onclick="enableAudio()"
+    style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:9999; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+    <div class="text-center">
+      <h1 class="display-3">CLICK TO START PROJECTOR</h1>
+    </div>
+  </div>
+
+  <div class="top-bar">
+    <div class="logo-container">
+      <img src="https://sisb.ac.th/wp-content/uploads/2022/07/main-logo-white.png" alt="School Logo" style="max-height: 40px; width: auto;">
+    </div>
+    
+    <div id="bannerText" style="font-weight:bold; color:#ffc107; font-size:1.5rem; flex-grow: 1; text-align: center; margin: 0 20px;">Initializing System...</div>
+    
+    <div class="clock">
+      <span id="offlineIndicator" class="offline-warning">⚠️ OFFLINE</span>
+      <span id="clock">00:00:00</span>
+    </div>
+  </div>
+
+  <div class="main-grid">
+    <div>
+      <h2 style="color:#2ecc71; font-family:'Oswald'; margin-bottom:15px;">NOW CALLING</h2>
+      <div id="calledList"></div>
+    </div>
+    <div>
+      <h2 style="color:#e74c3c; font-family:'Oswald'; margin-bottom:15px;">WAITLIST</h2>
+      <div id="deferredList"></div>
+    </div>
+  </div>
+
+  <div class="stats-bar">
+    <div>Active Meetings: <span id="statActive" style="color:#fff; font-weight:bold;">0</span></div>
+    <div>Total Completed: <span id="statDone" style="color:#fff; font-weight:bold;">0</span></div>
+  </div>
+
+  <audio id="chime" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"></audio>
+
+  <script>
+    function updateClock() {
+      document.getElementById('clock').innerText = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit', hour12: false});
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    let allData = { called: [], deferred: [] };
+    let page = 0;
+
+    function getGradeClass(name) {
+      const match = name.match(/\b(7|8|9|10|11|12)\b/) || name.match(/(7|8|9|10|11|12)/);
+      return match ? `grade-${match[0]}` : 'grade-default';
+    }
+
+    function enableAudio() {
+      document.getElementById('clickOverlay').style.display = 'none';
+      const chime = document.getElementById('chime');
+      
+      // Catch promise rejection to prevent errors if the browser suspends audio
+      chime.play().then(() => chime.pause()).catch(e => console.log("Audio prep blocked:", e));
+      
+      setInterval(fetchData, 10000);
+      setInterval(cyclePage, 12000);
+      animateTimer();
+      fetchData();
+    }
+
+    function animateTimer() {
+      let width = 100;
+      setInterval(() => {
+        width -= (100 / 120);
+        if (width <= 0) width = 100;
+        document.getElementById('timerBar').style.width = width + "%";
+      }, 100);
+    }
+
+    function fetchData() {
+      // Fetch Main Data & Message together
+      google.script.run
+        .withSuccessHandler(data => {
+          document.getElementById('offlineIndicator').style.display = 'none'; // Hide warning
+          
+          if (data.called.length > allData.called.length) {
+            document.getElementById('chime').play().catch(e => console.log("Chime blocked:", e));
+          }
+          
+          allData = data;
+          document.getElementById('statActive').innerText = data.stats.active;
+          document.getElementById('statDone').innerText = data.stats.done;
+          
+          // Update the banner message directly from the combined payload
+          if(data.message) document.getElementById('bannerText').innerText = data.message;
+          
+          render();
+        })
+        .withFailureHandler(err => {
+          console.warn("Display data fetch failed:", err);
+          document.getElementById('offlineIndicator').style.display = 'inline-block'; // Show warning
+        })
+        .getDisplayData();
+    }
+
+    function cyclePage() {
+      const maxPages = Math.max(Math.ceil(allData.called.length / 12), Math.ceil(allData.deferred.length / 20));
+      page = (page + 1 >= maxPages) ? 0 : page + 1;
+      render();
+    }
+
+    function render() {
+      const displayCalled = allData.called.slice(page * 12, (page + 1) * 12);
+      const displayWait = allData.deferred.slice(page * 20, (page + 1) * 20);
+
+      document.getElementById('calledList').innerHTML = displayCalled.map(c => `
+        <div class="card card-call">
+          <div class="child-name">${c.child.split(' (')[0]} <span class="grade-tag ${getGradeClass(c.child)}">${c.child.match(/\(([^)]+)\)/)?.[1] || ''}</span></div>
+          <div style="color:#eee; font-weight:500;">Teacher: ${c.teacher}</div>
+          <div style="color:#2ecc71; font-weight:bold; font-size:0.9rem;">ROOM: ${c.room}</div>
+        </div>`).join('');
+
+      document.getElementById('deferredList').innerHTML = displayWait.map(d => `
+        <div class="wait-item">
+          <div class="wait-student">${d.child}</div>
+          <div class="wait-teacher">Waiting for: ${d.teacher}</div>
+        </div>
+      `).join('');
+    }
+  </script>
+  
+  <div class="bg-white p-2 rounded shadow text-center" style="position: fixed; bottom: 20px; right: 20px; z-index: 1000;">
+    <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=https://script.google.com/a/macros/sisbschool.com/s/AKfycbw1qRvy4X3PLfpl7x0tL3b7C2-z3hg4SMlQQVrIxWAxJQRZ745R-AcRTd8Fsooyeztj/exec" alt="Scan to Join">
+    <div class="mt-1 fw-bold text-dark" style="font-size: 0.9rem;">Scan to Join</div>
+  </div>
+</body>
+
+</html>
