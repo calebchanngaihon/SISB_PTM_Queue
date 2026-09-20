@@ -1,4 +1,4 @@
-🏫 SISB Real-Time Parent-Teacher Meeting (PTM) Queue Management System
+🏫 Real-Time Parent-Teacher Meeting (PTM) Queue Management System
 
 An End-to-End Product Management & Technical Architecture Case Study
 
